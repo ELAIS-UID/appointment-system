@@ -1,0 +1,5 @@
+{
+  "name": "CareConnect",
+  "description": "A premium, production-ready doctor appointment booking platform featuring role-based dashboards, verified hospital listings, and a modern Shadcn/UI aesthetic.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================
+    // HELPER FUNCTIONS
+    // ============================================================
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user is the document owner
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Get user role from their profile document
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    // Check if user is an admin
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'ADMIN';
+    }
+    
+    // Check if user is a doctor
+    function isDoctor() {
+      return isAuthenticated() && getUserRole() == 'DOCTOR';
+    }
+    
+    // Check if user is a regular user
+    function isUser() {
+      return isAuthenticated() && getUserRole() == 'USER';
+    }
+    
+    // Check if user is admin or doctor
+    function isStaff() {
+      return isAdmin() || isDoctor();
+    }
+
+    // ============================================================
+    // USERS COLLECTION
+    // ============================================================
+    match /users/{userId} {
+      // Only authenticated users can read user profiles
+      allow read: if isAuthenticated();
+      
+      // Users can only create/update their own profile
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) && 
+        // Prevent users from changing their own role
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
+      
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================================
+    // DOCTORS COLLECTION
+    // ============================================================
+    match /doctors/{doctorId} {
+      // Public read access - anyone can view doctors (for homepage)
+      allow read: if true;
+      
+      // TEMPORARY: Allow public write for initial seeding
+      // TODO: Change back to "if isAdmin();" after seeding data
+      allow create, delete: if true;
+      
+      // Admins can update anything, doctors can only update their own slots
+      allow update: if isAdmin() || 
+        (isDoctor() && 
+         onlyUpdating(['availableSlots']));
+    }
+    
+    // Helper: Check if only specific fields are being updated
+    function onlyUpdating(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+    
+    // ============================================================
+    // HOSPITALS COLLECTION
+    // ============================================================
+    match /hospitals/{hospitalId} {
+      // Public read access
+      allow read: if true;
+      
+      // TEMPORARY: Allow public write for initial seeding
+      // TODO: Change back to "if isAdmin();" after seeding data
+      allow write: if true;
+    }
+    
+    // ============================================================
+    // APPOINTMENTS COLLECTION
+    // ============================================================
+    match /appointments/{appointmentId} {
+      // Authenticated users can read appointments
+      // Client-side filtering will show users only their own appointments
+      // Staff can see all appointments
+      allow read: if isAuthenticated();
+      
+      // Authenticated users can create appointments for themselves
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'PENDING';
+      
+      // Doctors and admins can update appointment status
+      allow update: if isStaff() ||
+        // Users can only cancel their own pending appointments
+        (isOwner(resource.data.userId) && 
+         resource.data.status == 'PENDING' &&
+         request.resource.data.status == 'CANCELLED');
+      
+      // Only admins can delete appointments
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================================
+    // BRANDS COLLECTION
+    // ============================================================
+    match /brands/{brandId} {
+      // Public read access
+      allow read: if true;
+      
+      // TEMPORARY: Allow public write for initial seeding
+      // TODO: Change back to "if isAdmin();" after seeding data
+      allow write: if true;
+    }
+  }
+}
